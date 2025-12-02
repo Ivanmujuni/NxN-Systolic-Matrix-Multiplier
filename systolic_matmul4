@@ -1,0 +1,106 @@
+module systolic_matmul4 #(
+parameter N = 16,
+parameter DATA_WIDTH = 16,
+parameter ACC_WIDTH = 40
+)(
+input clk,
+input rst_n,
+input start,
+
+input signed [DATA_WIDTH*N - 1 : 0] a_in,
+input signed [DATA_WIDTH*N - 1 : 0] b_in,
+
+output reg signed [ACC_WIDTH - 1 : 0] c_out,
+output reg valid_out
+);
+
+wire signed [DATA_WIDTH-1:0] a_in_vec [0:N-1];
+wire signed [DATA_WIDTH-1:0] b_in_vec [0:N-1];
+
+genvar idx;
+generate
+ for (idx=0; idx<N; idx = idx +1) begin : UNPACK_INPUTS
+  assign a_in_vec[idx] = a_in[(idx+1)*DATA_WIDTH-1: idx*DATA_WIDTH];
+  assign b_in_vec[idx] = b_in[(idx+1)*DATA_WIDTH-1 : idx*DATA_WIDTH];
+ end
+endgenerate
+
+reg signed [DATA_WIDTH - 1 : 0] a_pe [0:N-1][0:N-1];
+reg signed [DATA_WIDTH - 1 : 0] b_pe [0:N-1][0:N-1];
+reg signed [ACC_WIDTH - 1 : 0] c_pe [0:N-1][0:N-1];
+
+integer r, c;
+
+genvar i,j;
+generate
+for (i = 0; i<N; i= i+1) begin: ROW
+for (j = 0; j<N; j = j+1 ) begin: COL
+
+always @(posedge clk or negedge rst_n) begin
+ if(!rst_n) begin
+  a_pe[i][j] <= 0;
+  b_pe[i][j] <= 0;
+ end
+ else begin
+  if(i == 0 && j == 0) begin
+   if (start) begin
+    a_pe[i][j] <= a_in_vec[j];
+    b_pe[i][j] <= b_in_vec[i];
+   end
+  end
+  else if(i == 0) begin
+   a_pe[i][j] <= a_pe[i][j-1];
+   if (start) b_pe[i][j] <= b_in_vec[i];
+  end
+  else if (j == 0) begin
+   b_pe[i][j] <= b_pe[i -1][j];
+   if (start) a_pe[i][j] <= a_in_vec[j];
+  end
+  else begin
+   a_pe[i][j] <= a_pe[i][j-1];
+   b_pe[i][j] <= b_pe[i - 1][j];
+  end
+ end
+end
+
+always @(posedge clk or negedge rst_n) begin
+ if(!rst_n)
+  c_pe[i][j] <= 0;
+ else
+  c_pe[i][j] <= c_pe[i][j] + a_pe[i][j]*b_pe[i][j];
+end
+
+end
+end
+endgenerate
+
+reg [31:0] cycle_cnt;
+
+always @(posedge clk or negedge rst_n) begin
+ if(!rst_n) begin
+  cycle_cnt <= 0;
+  valid_out <= 0;
+ end
+ else if (start) begin
+  cycle_cnt <= 1;
+  valid_out <= 0;
+ end
+ else if (cycle_cnt != 0) begin
+  cycle_cnt <= cycle_cnt + 1;
+
+  if (cycle_cnt == 2*N - 2)
+   valid_out <= 1;
+
+  if (cycle_cnt == 2*N-1)
+   valid_out <= 0;
+ end
+end
+
+always @(posedge clk or negedge rst_n) begin
+ if (!rst_n)
+  c_out <= 0;
+ else if (valid_out)
+  c_out <= c_pe[0][0];
+end
+
+endmodule
